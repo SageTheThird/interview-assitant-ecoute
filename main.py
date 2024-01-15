@@ -9,10 +9,11 @@ import torch
 import sys
 import TranscriberModels
 import subprocess
+import tkinter as tk
 
 def write_in_textbox(textbox, text):
     textbox.delete("0.0", "end")
-    textbox.insert("0.0", text)
+    textbox.insert("end", text)
 
 def update_transcript_UI(transcriber, textbox):
     transcript_string = transcriber.get_transcript()
@@ -20,9 +21,11 @@ def update_transcript_UI(transcriber, textbox):
     textbox.after(300, update_transcript_UI, transcriber, textbox)
 
 def update_response_UI(responder, textbox, update_interval_slider_label, update_interval_slider, freeze_state):
+    print('update ui is called')
     if not freeze_state[0]:
         response = responder.response
 
+        print(response)
         textbox.configure(state="normal")
         write_in_textbox(textbox, response)
         textbox.configure(state="disabled")
@@ -33,10 +36,21 @@ def update_response_UI(responder, textbox, update_interval_slider_label, update_
 
     textbox.after(300, update_response_UI, responder, textbox, update_interval_slider_label, update_interval_slider, freeze_state)
 
+def stop_transcription(transcriber):
+    transcriber.stop_transcription()  
+
 def clear_context(transcriber, audio_queue):
     transcriber.clear_transcript_data()
     with audio_queue.mutex:
         audio_queue.queue.clear()
+
+def toggle_transcription(transcriber, button):
+    if transcriber.is_transcribing:
+        transcriber.stop_transcription()
+        button.configure(text="Resume Transcribing")
+    else:
+        transcriber.resume_transcription()
+        button.configure(text="Stop Transcribing")
 
 def create_ui_components(root):
     ctk.set_appearance_mode("dark")
@@ -53,7 +67,7 @@ def create_ui_components(root):
     response_textbox = ctk.CTkTextbox(root, width=300, font=("Arial", font_size), text_color='#639cdc', wrap="word")
     response_textbox.grid(row=0, column=1, padx=10, pady=20, sticky="nsew")
 
-    freeze_button = ctk.CTkButton(root, text="Freeze", command=None)
+    freeze_button = ctk.CTkButton(root, text="Unfreeze", command=None)
     freeze_button.grid(row=1, column=1, padx=10, pady=3, sticky="nsew")
 
     update_interval_slider_label = ctk.CTkLabel(root, text=f"", font=("Arial", 12), text_color="#FFFCF2")
@@ -63,7 +77,22 @@ def create_ui_components(root):
     update_interval_slider.set(2)
     update_interval_slider.grid(row=3, column=1, padx=10, pady=10, sticky="nsew")
 
-    return transcript_textbox, response_textbox, update_interval_slider, update_interval_slider_label, freeze_button
+    copy_button = ctk.CTkButton(root, text="Copy Transcript", command=lambda: copy_to_clipboard(transcript_textbox, root))
+    copy_button.grid(row=2, column=0, padx=10, pady=3, sticky="nsew")
+
+   
+
+    return transcript_textbox, response_textbox, update_interval_slider, update_interval_slider_label, freeze_button, copy_button
+
+
+def copy_to_clipboard(textbox, root):
+    text = textbox.get("1.0", "end-1c")  # Get all text from the textbox
+    lines = text.split('\n')  # Split text into lines
+    reversed_text = '\n'.join(reversed(lines))  # Reverse the order and join back into a string
+
+    root.clipboard_clear()
+    root.clipboard_append(reversed_text)  # Copy reversed text to clipboard
+
 
 def main():
     try:
@@ -72,8 +101,7 @@ def main():
         print("ERROR: The ffmpeg library is not installed. Please install ffmpeg and try again.")
         return
 
-    root = ctk.CTk()
-    transcript_textbox, response_textbox, update_interval_slider, update_interval_slider_label, freeze_button = create_ui_components(root)
+    
 
     audio_queue = queue.Queue()
 
@@ -91,6 +119,12 @@ def main():
     transcribe = threading.Thread(target=transcriber.transcribe_audio_queue, args=(audio_queue,))
     transcribe.daemon = True
     transcribe.start()
+
+    root = ctk.CTk()
+     # Set the window to always be on top
+    root.attributes('-topmost', True)
+
+    transcript_textbox, response_textbox, update_interval_slider, update_interval_slider_label, freeze_button, copy_button = create_ui_components(root)
 
     responder = GPTResponder()
     respond = threading.Thread(target=responder.respond_to_transcriber, args=(transcriber,))
@@ -110,7 +144,11 @@ def main():
     clear_transcript_button = ctk.CTkButton(root, text="Clear Transcript", command=lambda: clear_context(transcriber, audio_queue, ))
     clear_transcript_button.grid(row=1, column=0, padx=10, pady=3, sticky="nsew")
 
-    freeze_state = [False]  # Using list to be able to change its content inside inner functions
+    # toggle button for transcription
+    toggle_transcription_button = ctk.CTkButton(root, text="Stop Transcribing", command=lambda: toggle_transcription(transcriber, toggle_transcription_button))
+    toggle_transcription_button.grid(row=5, column=0, padx=10, pady=3, sticky="nsew")
+
+    freeze_state = [True]  # Using list to be able to change its content inside inner functions
     def freeze_unfreeze():
         freeze_state[0] = not freeze_state[0]  # Invert the freeze state
         freeze_button.configure(text="Unfreeze" if freeze_state[0] else "Freeze")
@@ -119,9 +157,10 @@ def main():
 
     update_interval_slider_label.configure(text=f"Update interval: {update_interval_slider.get()} seconds")
 
+    last_transcript = [""]  # Initialize with empty string
+
     update_transcript_UI(transcriber, transcript_textbox)
     update_response_UI(responder, response_textbox, update_interval_slider_label, update_interval_slider, freeze_state)
- 
     root.mainloop()
 
 if __name__ == "__main__":

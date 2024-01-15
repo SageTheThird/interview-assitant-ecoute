@@ -9,6 +9,8 @@ import io
 from datetime import timedelta
 import pyaudiowpatch as pyaudio
 from heapq import merge
+import queue  
+
 
 PHRASE_TIMEOUT = 3.05
 
@@ -19,6 +21,7 @@ class AudioTranscriber:
         self.transcript_data = {"You": [], "Speaker": []}
         self.transcript_changed_event = threading.Event()
         self.audio_model = model
+        self.is_transcribing = True 
         self.audio_sources = {
             "You": {
                 "sample_rate": mic_source.SAMPLE_RATE,
@@ -42,24 +45,30 @@ class AudioTranscriber:
 
     def transcribe_audio_queue(self, audio_queue):
         while True:
-            who_spoke, data, time_spoken = audio_queue.get()
-            self.update_last_sample_and_phrase_status(who_spoke, data, time_spoken)
-            source_info = self.audio_sources[who_spoke]
-
-            text = ''
             try:
-                fd, path = tempfile.mkstemp(suffix=".wav")
-                os.close(fd)
-                source_info["process_data_func"](source_info["last_sample"], path)
-                text = self.audio_model.get_transcription(path)
-            except Exception as e:
-                print(e)
-            finally:
-                os.unlink(path)
+                who_spoke, data, time_spoken = audio_queue.get(timeout=1)  # Use a timeout
+                if self.is_transcribing:
+                    self.update_last_sample_and_phrase_status(who_spoke, data, time_spoken)
+                    source_info = self.audio_sources[who_spoke]
 
-            if text != '' and text.lower() != 'you':
-                self.update_transcript(who_spoke, text, time_spoken)
-                self.transcript_changed_event.set()
+                    text = ''
+                    try:
+                        fd, path = tempfile.mkstemp(suffix=".wav")
+                        os.close(fd)
+                        source_info["process_data_func"](source_info["last_sample"], path)
+                        text = self.audio_model.get_transcription(path)
+                    except Exception as e:
+                        print(e)
+                    finally:
+                        os.unlink(path)
+
+                    if text != '' and text.lower() != 'you':
+                        self.update_transcript(who_spoke, text, time_spoken)
+                        self.transcript_changed_event.set()
+            except queue.Empty:
+                # This exception is thrown when the queue is empty. Continue looping.
+                continue
+            
 
     def update_last_sample_and_phrase_status(self, who_spoke, data, time_spoken):
         source_info = self.audio_sources[who_spoke]
@@ -103,6 +112,13 @@ class AudioTranscriber:
             key=lambda x: x[1], reverse=True))
         combined_transcript = combined_transcript[:MAX_PHRASES]
         return "".join([t[0] for t in combined_transcript])
+
+    def stop_transcription(self):
+        self.is_transcribing = False  
+    
+    def resume_transcription(self):
+        if not self.is_transcribing:
+            self.is_transcribing = True
     
     def clear_transcript_data(self):
         self.transcript_data["You"].clear()
