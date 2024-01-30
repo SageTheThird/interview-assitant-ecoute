@@ -20,7 +20,6 @@ def generate_response_from_transcript(transcript):
     
     full_response = response.choices[0].message.content
 
-    print(full_response)
 
     # Split the response into brief and detailed parts
     try:
@@ -30,7 +29,13 @@ def generate_response_from_transcript(transcript):
 
         brief_response = brief_match.group(1) if brief_match else ''
         detailed_response = detailed_match.group(1).strip() if detailed_match else ''
-        return brief_response, detailed_response
+
+        # Check if either the brief or detailed response is empty, and if so, use the full_response
+        if not brief_response or not detailed_response:
+            brief_response = 'no valid response'
+            detailed_response = full_response
+
+        return brief_response, detailed_response 
     except:
         return '', ''
 

@@ -21,11 +21,9 @@ def update_transcript_UI(transcriber, textbox):
     textbox.after(300, update_transcript_UI, transcriber, textbox)
 
 def update_response_UI(responder, textbox, update_interval_slider_label, update_interval_slider, freeze_state):
-    print('update ui is called')
     if not freeze_state[0]:
         response = responder.response
 
-        print(response)
         textbox.configure(state="normal")
         write_in_textbox(textbox, response)
         textbox.configure(state="disabled")
